@@ -1,0 +1,76 @@
+#cloud-config
+
+write_files:
+  - path: /opt/vyatta/etc/config/scripts/vyos-postconfig-bootup.script
+    permissions: '0775'
+    content: |
+      #!/bin/vbash
+      source /opt/vyatta/etc/functions/script-template
+      configure
+      #!
+      set vpn ipsec ipsec-interfaces interface 'eth0'
+      set vpn ipsec esp-group ESP-GROUP compression 'disable'
+      set vpn ipsec esp-group ESP-GROUP lifetime '3600'
+      set vpn ipsec esp-group ESP-GROUP mode 'tunnel'
+      set vpn ipsec esp-group ESP-GROUP pfs 'dh-group19'
+      set vpn ipsec esp-group ESP-GROUP proposal 10 encryption 'aes256gcm128'
+      set vpn ipsec esp-group ESP-GROUP proposal 10 hash 'sha256'
+      #!
+      set vpn ipsec ike-group IKEv2-GROUP dead-peer-detection action 'restart'
+      set vpn ipsec ike-group IKEv2-GROUP dead-peer-detection interval '30'
+      set vpn ipsec ike-group IKEv2-GROUP dead-peer-detection timeout '120'
+      set vpn ipsec ike-group IKEv2-GROUP ikev2-reauth 'no'
+      set vpn ipsec ike-group IKEv2-GROUP key-exchange 'ikev2'
+      set vpn ipsec ike-group IKEv2-GROUP lifetime '10800'
+      set vpn ipsec ike-group IKEv2-GROUP mobike 'disable'
+      set vpn ipsec ike-group IKEv2-GROUP proposal 10 dh-group '19'
+      set vpn ipsec ike-group IKEv2-GROUP proposal 10 encryption 'aes256gcm128'
+      set vpn ipsec ike-group IKEv2-GROUP proposal 10 hash 'sha256'
+      #!
+      # set interfaces loopback lo address ${router_id}/32
+      # set protocols static route ${network} next-hop ${gateway}
+      #!
+      set interfaces vti vti0 address '${bgp_ip}/30'
+      set interfaces vti vti0 description 'SITE1-TUN0'
+      set interfaces vti vti0 mtu '1400'
+      set vpn ipsec site-to-site peer ${peer} authentication id '${host}'
+      set vpn ipsec site-to-site peer ${peer} authentication remote-id '${peer}'
+      set vpn ipsec site-to-site peer ${peer} authentication mode 'pre-shared-secret'
+      set vpn ipsec site-to-site peer ${peer} authentication pre-shared-secret 'changeme'
+      # set vpn ipsec site-to-site peer ${peer} connection-type 'respond'
+      set vpn ipsec site-to-site peer ${peer} ike-group 'IKEv2-GROUP'
+      set vpn ipsec site-to-site peer ${peer} ikev2-reauth 'inherit'
+      set vpn ipsec site-to-site peer ${peer} local-address '${host}'
+      set vpn ipsec site-to-site peer ${peer} vti bind 'vti0'
+      set vpn ipsec site-to-site peer ${peer} vti esp-group 'ESP-GROUP'
+      set vpn ipsec site-to-site peer ${peer} description 'SITE1-TUN0'
+      #!
+      set protocols bgp ${asn} neighbor ${neighbor} ebgp-multihop 10
+
+      # set protocols bgp ${asn} parameters router-id '${router_id}'
+      set protocols bgp ${asn} neighbor ${neighbor} remote-as '${remote_asn}'
+      set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast soft-reconfiguration inbound
+      set protocols bgp ${asn} neighbor ${neighbor} timers holdtime '60'
+      set protocols bgp ${asn} neighbor ${neighbor} timers keepalive '20'
+      
+      set protocols bgp ${asn} address-family ipv4-unicast network '10.0.1.0/24'
+      # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast weight 33000
+
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_1} remote-as '${cr_asn}'
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_1} address-family ipv4-unicast soft-reconfiguration inbound
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_1} timers holdtime '60'
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_1} timers keepalive '20'
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_2} remote-as '${cr_asn}'
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_2} address-family ipv4-unicast soft-reconfiguration inbound
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_2} timers holdtime '60'
+      #set protocols bgp ${asn} neighbor ${neighbor_cr_2} timers keepalive '20'
+      set protocols bgp ${asn} parameters graceful-restart
+      #!
+      
+      commit
+      #!
+      run reset ip bgp ${neighbor}
+      #run reset ip bgp ${neighbor_cr_1}
+      #run reset ip bgp ${neighbor_cr_2}
+      save
+      exit
