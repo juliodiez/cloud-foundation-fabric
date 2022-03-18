@@ -55,7 +55,7 @@ write_files:
       # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast route-map export 'HUB-OUT'
       # set protocols bgp ${asn} address-family ipv4-unicast redistribute static route-map 'HUB-OUT'
       
-      set protocols bgp ${asn} address-family ipv4-unicast network 10.128.0.4/30
+      set protocols bgp ${asn} address-family ipv4-unicast network ${network}
       # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast weight 33000
 
       set protocols bgp ${asn} parameters graceful-restart

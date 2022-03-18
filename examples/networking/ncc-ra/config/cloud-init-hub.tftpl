@@ -53,7 +53,7 @@ write_files:
       set protocols bgp ${asn} neighbor ${neighbor} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor} timers keepalive '20'
       
-      set protocols bgp ${asn} address-family ipv4-unicast network '10.0.1.0/24'
+      set protocols bgp ${asn} address-family ipv4-unicast network ${network}
       # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast weight 33000
 
       #set protocols bgp ${asn} neighbor ${neighbor_cr_1} remote-as '${cr_asn}'

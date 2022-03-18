@@ -40,8 +40,11 @@ module "project" {
 
 locals {
   onprem_region = keys(var.regions_config["onprem"])[0]
-  onprem_subnet = module.vpc["onprem"].subnet_self_links["${local.onprem_region}/onprem-${local.onprem_region}-0"]
-  admin_ranges  = flatten([
+  onprem_subnet_0 = module.vpc["onprem"].subnet_self_links[
+  "${local.onprem_region}/onprem-${local.onprem_region}-0"]
+  onprem_subnet_1 = module.vpc["onprem"].subnet_self_links[
+  "${local.onprem_region}/onprem-${local.onprem_region}-1"]
+  admin_ranges = flatten([
     for vpc in var.regions_config : [
       for ranges in vpc : ranges
     ]
@@ -56,7 +59,7 @@ module "vpc" {
   subnets = flatten([
     for region, ranges in each.value : [
       for idx, range in ranges : {
-        name               = "${each.key}-${region}-${idx}"
+        name               = "${each.key}-${region}-${each.key == "hub" || each.key == "onprem" ? idx : idx + 1}"
         ip_cidr_range      = range
         region             = region
         secondary_ip_range = {}
@@ -84,13 +87,13 @@ module "hub-to-prod-peering" {
 }
 
 module "hub-to-dev-peering" {
-  count = contains(keys(module.vpc), "dev") ? 1 : 0
+  count                      = contains(keys(module.vpc), "dev") ? 1 : 0
   source                     = "../../../modules/net-vpc-peering"
   local_network              = module.vpc["hub"].self_link
   peer_network               = module.vpc["dev"].self_link
   export_local_custom_routes = true
   export_peer_custom_routes  = false
-  depends_on = [module.hub-to-prod-peering]
+  depends_on                 = [module.hub-to-prod-peering]
 }
 
 ################################################################################
@@ -100,15 +103,15 @@ module "hub-to-dev-peering" {
 # IPs for RAs in the hub and onprem. Although static, they could be dynamically
 # reserved but the module "net-vpn-static" would fail ("for_each" dependency).
 locals {
-  ip_ra_hub = {for region, ranges in var.regions_config["hub"] :
+  ip_ra_hub = { for region, ranges in var.regions_config["hub"] :
     region => cidrhost(element(ranges, 0), 2)
   }
 
   # Using indexes is not ideal but enough to simulate the onprem DC. Here region
   # means destination of the RA tunnel, not where it is created.
-  ip_ra_onprem = {for region, ranges in var.regions_config["hub"] :
+  ip_ra_onprem = { for region, ranges in var.regions_config["hub"] :
     region => cidrhost(element(values(var.regions_config["onprem"])[0], 0),
-      2 + index(keys(var.regions_config["hub"]), region))
+    2 + index(keys(var.regions_config["hub"]), region))
   }
 }
 
@@ -129,7 +132,7 @@ resource "google_compute_address" "ra-onprem" {
   name         = "ra-onprem-${each.key}"
   project      = module.project.project_id
   region       = local.onprem_region
-  subnetwork   = local.onprem_subnet
+  subnetwork   = local.onprem_subnet_0
   address_type = "INTERNAL"
   address      = local.ip_ra_onprem[each.key]
 }
@@ -226,21 +229,21 @@ module "vpn-onprem-hub" {
 locals {
   # Hub RAs. They peer with onhub RAs AND with CRs.
   # hub_ra_config = { for region, ranges in var.regions_config["hub"] : region => {
-    # network = element(ranges, 0)
-    # gateway = cidrhost(element(ranges, 0), 1)
-    # # First free IP (host '2') of the routers' range is for the RA.
-    # # The next two will be for the CR interfaces.
-    # host      = cidrhost(element(ranges, 0), 2)
-    # cr_peer_1 = cidrhost(element(ranges, 0), 3)
-    # cr_peer_2 = cidrhost(element(ranges, 0), 4)
+  # network = element(ranges, 0)
+  # gateway = cidrhost(element(ranges, 0), 1)
+  # # First free IP (host '2') of the routers' range is for the RA.
+  # # The next two will be for the CR interfaces.
+  # host      = cidrhost(element(ranges, 0), 2)
+  # cr_peer_1 = cidrhost(element(ranges, 0), 3)
+  # cr_peer_2 = cidrhost(element(ranges, 0), 4)
   # } }
   # We will use these same parameters thorughout all hub RAs. I think it will
   # work as long as the peers are different.
   _ra_bgp_network = "169.254.100.0/30"
-  hub_ra_bgp_ip       = cidrhost(local._ra_bgp_network, 1) # 169.254.100.1
+  hub_ra_bgp_ip   = cidrhost(local._ra_bgp_network, 1) # 169.254.100.1
   # hub_ra_id          = "1.1.1.1"
-  hub_asn            = "65001"
-  cr_asn             = "65011"
+  hub_asn = "65001"
+  cr_asn  = "65011"
 
   # Onprem RAs. Using indexes is not ideal but enough to simulate the onprem DC.
   # onprem_ra_network = element(values(var.regions_config["onprem"])[0], 0)
@@ -250,9 +253,9 @@ locals {
   #   host = cidrhost(local.onprem_ra_network,
   #   2 + index(keys(var.regions_config["hub"]), region))
   # } }
-  onprem_ra_bgp_ip       = cidrhost(local._ra_bgp_network, 2) # 169.254.100.2
+  onprem_ra_bgp_ip = cidrhost(local._ra_bgp_network, 2) # 169.254.100.2
   # onprem_ra_id          = "11.11.11.11"
-  onprem_asn            = "65010"
+  onprem_asn = "65010"
 }
 
 # We instantiate as many routers in the DC as in the hub.
@@ -272,20 +275,20 @@ module "onprem-router" {
   metadata = {
     user-data = templatefile("${path.module}/config/cloud-init-onprem.tftpl", {
       # network       = "N" #local.onprem_ra_config[each.key].network
-      network       = element(values(var.regions_config["onprem"])[0], 0)
-      gateway       = "G" #local.onprem_ra_config[each.key].gateway
-      host          = google_compute_address.ra-onprem[each.key].address
-      peer          = google_compute_address.ra-hub[each.key].address
-      router_id     = "ID" #local.onprem_ra_id
-      bgp_ip        = local.onprem_ra_bgp_ip
-      neighbor      = local.hub_ra_bgp_ip
-      asn           = local.onprem_asn
-      remote_asn    = local.hub_asn
+      network    = element(values(var.regions_config["onprem"])[0], 1)
+      gateway    = "G" #local.onprem_ra_config[each.key].gateway
+      host       = google_compute_address.ra-onprem[each.key].address
+      peer       = google_compute_address.ra-hub[each.key].address
+      router_id  = "ID" #local.onprem_ra_id
+      bgp_ip     = local.onprem_ra_bgp_ip
+      neighbor   = local.hub_ra_bgp_ip
+      asn        = local.onprem_asn
+      remote_asn = local.hub_asn
     })
   }
   network_interfaces = [{
     network    = module.vpc["onprem"].self_link
-    subnetwork = local.onprem_subnet
+    subnetwork = local.onprem_subnet_0
     nat        = false
     addresses = {
       internal = google_compute_address.ra-onprem[each.key].address
@@ -295,6 +298,18 @@ module "onprem-router" {
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
+}
+
+# The onprem router will learn how to reach GCP via BGP, but for convenience we
+# make this work with summarized static routes.
+resource "google_compute_route" "route-to-gcp" {
+  # for_each            = var.regions_config["hub"]
+  name              = "route-to-gcp-${local.onprem_region}"
+  project           = module.project.project_id
+  dest_range        = "10.0.0.0/8"
+  network           = module.vpc["onprem"].name
+  next_hop_instance = module.onprem-router[local.onprem_region].self_link
+  # next_hop_vpn_tunnel = module.vpn-onprem-hub[each.key].tunnel_self_links["hub"]
 }
 
 # We instantiate VyOS router VMs with cloud-init based configuration.
@@ -314,7 +329,7 @@ module "hub-router" {
   metadata = {
     user-data = templatefile("${path.module}/config/cloud-init-hub.tftpl", {
       # network       = "N" #local.hub_ra_config[each.key].network
-      network       = element(var.regions_config["hub"][each.key], 0)
+      network       = element(var.regions_config["hub"][each.key], 1)
       gateway       = "G" #local.hub_ra_config[each.key].gateway
       host          = google_compute_address.ra-hub[each.key].address
       peer          = google_compute_address.ra-onprem[each.key].address
@@ -442,7 +457,7 @@ module "vm-hub" {
   name       = "hub-${each.key}"
   network_interfaces = [{
     network    = module.vpc["hub"].self_link
-    subnetwork = module.vpc["hub"].subnet_self_links["${each.key}/hub-${each.key}-0"]
+    subnetwork = module.vpc["hub"].subnet_self_links["${each.key}/hub-${each.key}-1"]
     nat        = false
     addresses  = null
   }]
@@ -459,7 +474,7 @@ module "vm-prod" {
   name       = "prod-${each.key}"
   network_interfaces = [{
     network    = module.vpc["prod"].self_link
-    subnetwork = module.vpc["prod"].subnet_self_links["${each.key}/prod-${each.key}-0"]
+    subnetwork = module.vpc["prod"].subnet_self_links["${each.key}/prod-${each.key}-1"]
     nat        = false
     addresses  = null
   }]
@@ -477,7 +492,7 @@ module "vm-prod" {
 #   name       = "dev-${each.key}"
 #   network_interfaces = [{
 #     network    = module.vpc["dev"].self_link
-#     subnetwork = module.vpc["dev"].subnet_self_links["${each.key}/dev-${each.key}-0"]
+#     subnetwork = module.vpc["dev"].subnet_self_links["${each.key}/dev-${each.key}-1"]
 #     nat        = false
 #     addresses  = null
 #   }]
@@ -494,7 +509,7 @@ module "vm-onprem" {
   name       = "onprem-${each.key}"
   network_interfaces = [{
     network    = module.vpc["onprem"].self_link
-    subnetwork = local.onprem_subnet
+    subnetwork = local.onprem_subnet_1
     nat        = false
     addresses  = null
   }]

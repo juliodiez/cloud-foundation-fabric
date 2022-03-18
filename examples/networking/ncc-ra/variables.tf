@@ -15,10 +15,13 @@
 variable "regions_config" {
   description = "VPCs and their regions and CIDR ranges."
   type        = map(map(list(string)))
+  # For convenience it is assumed block 10/8 is for GCP and 192.168/16 for onprem.
+  # A subset of 172.16/12 is used for RAs and CRs.
   default = {
+    # First CIDR ranges used for RAs and CRs only.
     hub = {
-      europe-west1 = ["10.0.0.0/28", "10.0.0.16/28"]
-      europe-west3 = ["10.0.0.32/28", "10.0.0.48/28"]
+      europe-west1 = ["172.31.1.0/29", "10.0.0.0/26"]
+      europe-west3 = ["172.31.2.0/29", "10.0.0.64/26"]
     }
     prod = {
       europe-west1 = ["10.0.1.0/24"]
@@ -30,8 +33,9 @@ variable "regions_config" {
       europe-west3 = ["10.0.4.0/24"]
     }
     # This VPC simulates the onprem DC and we use only one region.
+    # First CIDR range used for RAs only.
     onprem = {
-      europe-west1 = ["10.128.0.0/24"]
+      europe-west1 = ["172.31.10.0/26", "192.168.0.0/24"]
     }
   }
 }
