@@ -27,9 +27,6 @@ write_files:
       set vpn ipsec ike-group IKEv2-GROUP proposal 10 encryption 'aes256gcm128'
       set vpn ipsec ike-group IKEv2-GROUP proposal 10 hash 'sha256'
       #!
-      # set interfaces loopback lo address ${router_id}/32
-      # set protocols static route ${network} next-hop ${gateway}
-      #!
       set interfaces vti vti0 address '${bgp_ip}/30'
       set interfaces vti vti0 description 'HUB-TUN0'
       set interfaces vti vti0 mtu '1400'
@@ -37,7 +34,6 @@ write_files:
       set vpn ipsec site-to-site peer ${peer} authentication remote-id '${peer}'
       set vpn ipsec site-to-site peer ${peer} authentication mode 'pre-shared-secret'
       set vpn ipsec site-to-site peer ${peer} authentication pre-shared-secret 'changeme'
-      # set vpn ipsec site-to-site peer ${peer} connection-type 'initiate'
       set vpn ipsec site-to-site peer ${peer} ike-group 'IKEv2-GROUP'
       set vpn ipsec site-to-site peer ${peer} ikev2-reauth 'inherit'
       set vpn ipsec site-to-site peer ${peer} local-address '${host}'
@@ -47,25 +43,14 @@ write_files:
       #!
       set protocols bgp ${asn} neighbor ${neighbor} ebgp-multihop 10
 
-      # set protocols bgp ${asn} parameters router-id '${router_id}'
       set protocols bgp ${asn} neighbor ${neighbor} remote-as '${remote_asn}'
       set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast soft-reconfiguration inbound
       set protocols bgp ${asn} neighbor ${neighbor} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor} timers keepalive '20'
-      # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast route-map export 'HUB-OUT'
-      # set protocols bgp ${asn} address-family ipv4-unicast redistribute static route-map 'HUB-OUT'
       
       set protocols bgp ${asn} address-family ipv4-unicast network ${network}
-      # set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast weight 33000
 
       set protocols bgp ${asn} parameters graceful-restart
-      #!
-      # set policy prefix-list HUB-OUT rule 10 action 'permit'
-      # set policy prefix-list HUB-OUT rule 10 prefix '${network}'
-      #!
-      # set policy route-map HUB-OUT rule 10 action 'permit'
-      # set policy route-map HUB-OUT rule 10 match ip address prefix-list 'HUB-OUT'
-      # set policy route-map HUB-OUT rule 10 set metric '101'
       #!
       
       commit

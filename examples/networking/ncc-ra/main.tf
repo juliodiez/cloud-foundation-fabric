@@ -227,89 +227,14 @@ module "vpn-onprem-hub" {
 ################################################################################
 
 locals {
-  # Hub RAs. They peer with onhub RAs AND with CRs.
-  # hub_ra_config = { for region, ranges in var.regions_config["hub"] : region => {
-  # network = element(ranges, 0)
-  # gateway = cidrhost(element(ranges, 0), 1)
-  # # First free IP (host '2') of the routers' range is for the RA.
-  # # The next two will be for the CR interfaces.
-  # host      = cidrhost(element(ranges, 0), 2)
-  # cr_peer_1 = cidrhost(element(ranges, 0), 3)
-  # cr_peer_2 = cidrhost(element(ranges, 0), 4)
-  # } }
   # We will use these same parameters thorughout all hub RAs. I think it will
   # work as long as the peers are different.
   _ra_bgp_network = "169.254.100.0/30"
   hub_ra_bgp_ip   = cidrhost(local._ra_bgp_network, 1) # 169.254.100.1
-  # hub_ra_id          = "1.1.1.1"
   hub_asn = "65001"
   cr_asn  = "65011"
-
-  # Onprem RAs. Using indexes is not ideal but enough to simulate the onprem DC.
-  # onprem_ra_network = element(values(var.regions_config["onprem"])[0], 0)
-  # onprem_ra_config = { for region, ranges in var.regions_config["hub"] : region => {
-  #   network = local.onprem_ra_network
-  #   gateway = cidrhost(local.onprem_ra_network, 1)
-  #   host = cidrhost(local.onprem_ra_network,
-  #   2 + index(keys(var.regions_config["hub"]), region))
-  # } }
   onprem_ra_bgp_ip = cidrhost(local._ra_bgp_network, 2) # 169.254.100.2
-  # onprem_ra_id          = "11.11.11.11"
   onprem_asn = "65010"
-}
-
-# We instantiate as many routers in the DC as in the hub.
-module "onprem-router" {
-  for_each   = var.regions_config["hub"]
-  source     = "../../../modules/compute-vm"
-  project_id = module.project.project_id
-  zone       = "${local.onprem_region}-b"
-  name       = "onprem-ra-${each.key}"
-  boot_disk = {
-    image = "projects/sentrium-public/global/images/vyos-1-2-7"
-    type  = "pd-balanced"
-    size  = 10
-  }
-  can_ip_forward = true
-  instance_type  = "n1-standard-2"
-  metadata = {
-    user-data = templatefile("${path.module}/config/cloud-init-onprem.tftpl", {
-      # network       = "N" #local.onprem_ra_config[each.key].network
-      network    = element(values(var.regions_config["onprem"])[0], 1)
-      gateway    = "G" #local.onprem_ra_config[each.key].gateway
-      host       = google_compute_address.ra-onprem[each.key].address
-      peer       = google_compute_address.ra-hub[each.key].address
-      router_id  = "ID" #local.onprem_ra_id
-      bgp_ip     = local.onprem_ra_bgp_ip
-      neighbor   = local.hub_ra_bgp_ip
-      asn        = local.onprem_asn
-      remote_asn = local.hub_asn
-    })
-  }
-  network_interfaces = [{
-    network    = module.vpc["onprem"].self_link
-    subnetwork = local.onprem_subnet_0
-    nat        = false
-    addresses = {
-      internal = google_compute_address.ra-onprem[each.key].address
-      external = null
-    }
-  }]
-  service_account        = module.service-account-gce.email
-  service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-  tags                   = ["ssh"]
-}
-
-# The onprem router will learn how to reach GCP via BGP, but for convenience we
-# make this work with summarized static routes.
-resource "google_compute_route" "route-to-gcp" {
-  # for_each            = var.regions_config["hub"]
-  name              = "route-to-gcp-${local.onprem_region}"
-  project           = module.project.project_id
-  dest_range        = "10.0.0.0/8"
-  network           = module.vpc["onprem"].name
-  next_hop_instance = module.onprem-router[local.onprem_region].self_link
-  # next_hop_vpn_tunnel = module.vpn-onprem-hub[each.key].tunnel_self_links["hub"]
 }
 
 # We instantiate VyOS router VMs with cloud-init based configuration.
@@ -328,12 +253,9 @@ module "hub-router" {
   instance_type  = "n1-standard-2"
   metadata = {
     user-data = templatefile("${path.module}/config/cloud-init-hub.tftpl", {
-      # network       = "N" #local.hub_ra_config[each.key].network
       network       = element(var.regions_config["hub"][each.key], 1)
-      gateway       = "G" #local.hub_ra_config[each.key].gateway
       host          = google_compute_address.ra-hub[each.key].address
       peer          = google_compute_address.ra-onprem[each.key].address
-      router_id     = "ID" #local.hub_ra_id
       bgp_ip        = local.hub_ra_bgp_ip
       neighbor      = local.onprem_ra_bgp_ip
       neighbor_cr_1 = google_compute_address.cr-hub-1[each.key].address
@@ -355,6 +277,55 @@ module "hub-router" {
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
+}
+
+# We instantiate as many router VMs in the DC as in the hub.
+module "onprem-router" {
+  for_each   = var.regions_config["hub"]
+  source     = "../../../modules/compute-vm"
+  project_id = module.project.project_id
+  zone       = "${local.onprem_region}-b"
+  name       = "onprem-ra-${each.key}"
+  boot_disk = {
+    image = "projects/sentrium-public/global/images/vyos-1-2-7"
+    type  = "pd-balanced"
+    size  = 10
+  }
+  can_ip_forward = true
+  instance_type  = "n1-standard-2"
+  metadata = {
+    user-data = templatefile("${path.module}/config/cloud-init-onprem.tftpl", {
+      network    = element(values(var.regions_config["onprem"])[0], 1)
+      host       = google_compute_address.ra-onprem[each.key].address
+      peer       = google_compute_address.ra-hub[each.key].address
+      bgp_ip     = local.onprem_ra_bgp_ip
+      neighbor   = local.hub_ra_bgp_ip
+      asn        = local.onprem_asn
+      remote_asn = local.hub_asn
+    })
+  }
+  network_interfaces = [{
+    network    = module.vpc["onprem"].self_link
+    subnetwork = local.onprem_subnet_0
+    nat        = false
+    addresses = {
+      internal = google_compute_address.ra-onprem[each.key].address
+      external = null
+    }
+  }]
+  service_account        = module.service-account-gce.email
+  service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+  tags                   = ["ssh"]
+}
+
+# The onprem router will learn how to reach GCP via BGP, but for convenience we
+# make this work with summarized static routes in the VPC.
+resource "google_compute_route" "route-to-gcp" {
+  name              = "route-to-gcp-${local.onprem_region}"
+  project           = module.project.project_id
+  dest_range        = "10.0.0.0/8"
+  network           = module.vpc["onprem"].name
+  next_hop_instance = module.onprem-router[local.onprem_region].self_link
 }
 
 ################################################################################

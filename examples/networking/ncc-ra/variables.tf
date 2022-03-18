@@ -40,40 +40,6 @@ variable "regions_config" {
   }
 }
 
-/* variable "ip_ranges" {
-  description = "IP CIDR ranges."
-  type        = map(string)
-  default = {
-    hub     = "10.0.0.0/24"
-    spoke-1 = "10.0.16.0/24"
-    spoke-2 = "10.0.32.0/24"
-    onprem  = "10.0.128.0/20"
-  }
-} */
-
-/* variable "ip_secondary_ranges" {
-  description = "Secondary IP CIDR ranges."
-  type        = map(string)
-  default = {
-    spoke-2-pods     = "10.128.0.0/18"
-    spoke-2-services = "172.16.0.0/24"
-  }
-} */
-
-/* variable "prefix" {
-  description = "Arbitrary string used to prefix resource names."
-  type        = string
-  default     = null
-} */
-
-/* variable "private_service_ranges" {
-  description = "Private service IP CIDR ranges."
-  type        = map(string)
-  default = {
-    spoke-2-cluster-1 = "192.168.0.0/28"
-  }
-} */
-
 variable "project_create" {
   description = "Set to non null if project needs to be created."
   type = object({
@@ -96,9 +62,3 @@ variable "project_id" {
   description = "Project id used for all resources."
   type        = string
 }
-
-/* variable "region" {
-  description = "VPC region."
-  type        = string
-  default     = "europe-west1"
-} */
