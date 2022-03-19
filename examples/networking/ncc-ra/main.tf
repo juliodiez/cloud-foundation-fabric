@@ -227,14 +227,8 @@ module "vpn-onprem-hub" {
 ################################################################################
 
 locals {
-  # We will use these same parameters thorughout all hub RAs. I think it will
-  # work as long as the peers are different.
-  _ra_bgp_network = "169.254.100.0/30"
-  hub_ra_bgp_ip   = cidrhost(local._ra_bgp_network, 1) # 169.254.100.1
-  hub_asn = "65001"
-  cr_asn  = "65011"
-  onprem_ra_bgp_ip = cidrhost(local._ra_bgp_network, 2) # 169.254.100.2
-  onprem_asn = "65010"
+  hub_ra_bgp_ip    = cidrhost(var.bgp_network, 1) # e.g. 169.254.0.1
+  onprem_ra_bgp_ip = cidrhost(var.bgp_network, 2) # e.g. 169.254.0.2
 }
 
 # We instantiate VyOS router VMs with cloud-init based configuration.
@@ -247,7 +241,7 @@ module "hub-router" {
   boot_disk = {
     image = "projects/sentrium-public/global/images/vyos-1-2-7"
     type  = "pd-balanced"
-    size  = 10
+    size  = 15
   }
   can_ip_forward = true
   instance_type  = "n1-standard-2"
@@ -260,9 +254,9 @@ module "hub-router" {
       neighbor      = local.onprem_ra_bgp_ip
       neighbor_cr_1 = google_compute_address.cr-hub-1[each.key].address
       neighbor_cr_2 = google_compute_address.cr-hub-2[each.key].address
-      asn           = local.hub_asn
-      cr_asn        = local.cr_asn
-      remote_asn    = local.onprem_asn
+      asn           = var.gcp-asn-ra
+      cr_asn        = var.gcp-asn-cr
+      remote_asn    = var.onprem-asn
     })
   }
   network_interfaces = [{
@@ -289,7 +283,7 @@ module "onprem-router" {
   boot_disk = {
     image = "projects/sentrium-public/global/images/vyos-1-2-7"
     type  = "pd-balanced"
-    size  = 10
+    size  = 15
   }
   can_ip_forward = true
   instance_type  = "n1-standard-2"
@@ -300,8 +294,8 @@ module "onprem-router" {
       peer       = google_compute_address.ra-hub[each.key].address
       bgp_ip     = local.onprem_ra_bgp_ip
       neighbor   = local.hub_ra_bgp_ip
-      asn        = local.onprem_asn
-      remote_asn = local.hub_asn
+      asn        = var.onprem-asn
+      remote_asn = var.gcp-asn-ra
     })
   }
   network_interfaces = [{

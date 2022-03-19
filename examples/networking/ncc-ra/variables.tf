@@ -40,6 +40,30 @@ variable "regions_config" {
   }
 }
 
+variable "bgp_network" {
+  description = "Use a /30 CIDR from the 169.254.0.0/16 block for BGP sessions."
+  type        = string
+  default     = "169.254.0.0/30"
+}
+
+variable "gcp-asn-ra" {
+  description = "ASN for RAs in GCP."
+  type        = string
+  default     = "65000"
+}
+
+variable "gcp-asn-cr" {
+  description = "ASN for CRs in GCP."
+  type        = string
+  default     = "65001"
+}
+
+variable "onprem-asn" {
+  description = "ASN for RAs in onprem."
+  type        = string
+  default     = "65010"
+}
+
 variable "project_create" {
   description = "Set to non null if project needs to be created."
   type = object({
