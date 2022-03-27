@@ -40,10 +40,8 @@ module "project" {
 
 locals {
   onprem_region = keys(var.regions_config["onprem"])[0]
-  onprem_subnet_0 = module.vpc["onprem"].subnet_self_links[
+  onprem_subnet = module.vpc["onprem"].subnet_self_links[
   "${local.onprem_region}/onprem-${local.onprem_region}-0"]
-  onprem_subnet_1 = module.vpc["onprem"].subnet_self_links[
-  "${local.onprem_region}/onprem-${local.onprem_region}-1"]
   admin_ranges = flatten([
     for vpc in var.regions_config : [
       for ranges in vpc : ranges
@@ -59,7 +57,7 @@ module "vpc" {
   subnets = flatten([
     for region, ranges in each.value : [
       for idx, range in ranges : {
-        name               = "${each.key}-${region}-${each.key == "hub" || each.key == "onprem" ? idx : idx + 1}"
+        name               = "${each.key}-${region}-${idx}"
         ip_cidr_range      = range
         region             = region
         secondary_ip_range = {}
@@ -87,7 +85,6 @@ module "hub-to-prod-peering" {
 }
 
 module "hub-to-dev-peering" {
-  count                      = contains(keys(module.vpc), "dev") ? 1 : 0
   source                     = "../../../modules/net-vpc-peering"
   local_network              = module.vpc["hub"].self_link
   peer_network               = module.vpc["dev"].self_link
@@ -100,8 +97,8 @@ module "hub-to-dev-peering" {
 #                                 IPs and VPNs                                 #
 ################################################################################
 
-# IPs for RAs in the hub and onprem. Although static, they could be dynamically
-# reserved but the module "net-vpn-static" would fail ("for_each" dependency).
+# IPs for RAs in the hub and onprem. Although static, if they are dynamically
+# reserved the module "net-vpn-static" would fail ("for_each" dependency).
 locals {
   ip_ra_hub = { for region, ranges in var.regions_config["hub"] :
     region => cidrhost(element(ranges, 0), 2)
@@ -132,7 +129,7 @@ resource "google_compute_address" "ra-onprem" {
   name         = "ra-onprem-${each.key}"
   project      = module.project.project_id
   region       = local.onprem_region
-  subnetwork   = local.onprem_subnet_0
+  subnetwork   = local.onprem_subnet
   address_type = "INTERNAL"
   address      = local.ip_ra_onprem[each.key]
 }
@@ -239,15 +236,18 @@ module "hub-router" {
   zone       = "${each.key}-b"
   name       = "hub-ra-${each.key}"
   boot_disk = {
-    image = "projects/sentrium-public/global/images/vyos-1-2-7"
+    # image = "projects/sentrium-public/global/images/vyos-1-2-7"
+    image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
     type  = "pd-balanced"
-    size  = 15
+    size  = 10
   }
   can_ip_forward = true
   instance_type  = "n1-standard-2"
   metadata = {
+    serial-port-enable = "TRUE"
     user-data = templatefile("${path.module}/config/cloud-init-hub.tftpl", {
-      network       = element(var.regions_config["hub"][each.key], 1)
+      network       = element(var.regions_config["hub"][each.key], 0)
+      gateway       = cidrhost(element(var.regions_config["hub"][each.key], 0), 1)
       host          = google_compute_address.ra-hub[each.key].address
       peer          = google_compute_address.ra-onprem[each.key].address
       bgp_ip        = local.hub_ra_bgp_ip
@@ -281,15 +281,18 @@ module "onprem-router" {
   zone       = "${local.onprem_region}-b"
   name       = "onprem-ra-${each.key}"
   boot_disk = {
-    image = "projects/sentrium-public/global/images/vyos-1-2-7"
+    # image = "projects/sentrium-public/global/images/vyos-1-2-7"
+    image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
     type  = "pd-balanced"
-    size  = 15
+    size  = 10
   }
   can_ip_forward = true
   instance_type  = "n1-standard-2"
   metadata = {
+    serial-port-enable = "TRUE"
     user-data = templatefile("${path.module}/config/cloud-init-onprem.tftpl", {
-      network    = element(values(var.regions_config["onprem"])[0], 1)
+      network    = element(values(var.regions_config["onprem"])[0], 0)
+      gateway    = cidrhost(element(values(var.regions_config["onprem"])[0], 0), 1)
       host       = google_compute_address.ra-onprem[each.key].address
       peer       = google_compute_address.ra-hub[each.key].address
       bgp_ip     = local.onprem_ra_bgp_ip
@@ -300,7 +303,7 @@ module "onprem-router" {
   }
   network_interfaces = [{
     network    = module.vpc["onprem"].self_link
-    subnetwork = local.onprem_subnet_0
+    subnetwork = local.onprem_subnet
     nat        = false
     addresses = {
       internal = google_compute_address.ra-onprem[each.key].address
@@ -323,92 +326,114 @@ resource "google_compute_route" "route-to-gcp" {
 }
 
 ################################################################################
-#                                 Cloud Routers                                #
+#                               NCC Configuration                              #
 ################################################################################
+
+resource "google_network_connectivity_hub" "ncc-hub" {
+  name    = "ncc-hub"
+  project = module.project.project_id
+}
+
+resource "google_network_connectivity_spoke" "spoke" {
+  for_each = var.regions_config["hub"]
+  name     = "spoke-${each.key}"
+  location = each.key
+  hub      = google_network_connectivity_hub.ncc-hub.id
+  project  = module.project.project_id
+  linked_router_appliance_instances {
+    instances {
+      virtual_machine = module.hub-router[each.key].instance.self_link
+      ip_address      = google_compute_address.ra-hub[each.key].address
+    }
+    site_to_site_data_transfer = false
+  }
+}
 
 # Google provider doesn't support to add interfaces to a Cloud Router from a
 # subnetwork, needed for creating a RA spoke in NCC. Using 'gcloud' for now.
-/* module "cloud-router" {
-  source  = "terraform-google-modules/gcloud/google"
-  version = "3.1.0"
-  service_account_key_file = "ncc-hub-project-f05272af14bb.json"
-  create_cmd_body = join(" ", [
-    "compute routers create hub-cr1 --project ${module.project.project_id}",
-    "--region=europe-west1 --network=hub --asn=65011"
-  ])
-  destroy_cmd_body = join(" ", [
-    "compute routers delete hub-cr1 --project ${module.project.project_id}",
-    "--region=europe-west1"
-  ])
-} */
+resource "google_compute_router" "cloud-router-ncc" {
+  for_each = var.regions_config["hub"]
+  name     = "hub-cr-ncc-${each.key}"
+  network  = module.vpc["hub"].self_link
+  region   = each.key
+  project  = module.project.project_id
+}
 
-/* module "cloud-router-interface-1" {
-  source  = "terraform-google-modules/gcloud/google"
-  version = "3.1.0"
+module "cloud-router-ncc-if-1" {
+  for_each                 = var.regions_config["hub"]
+  source                   = "terraform-google-modules/gcloud/google"
+  version                  = "3.1.0"
   service_account_key_file = "ncc-hub-project-f05272af14bb.json"
   create_cmd_body = join(" ", [
-    "compute routers add-interface hub-cr1 --project ${module.project.project_id}",
-    "--interface-name=hub-router-1-0 --subnetwork=hub-europe-west1-1 --ip-address=10.0.0.19",
-    "--region=europe-west1"
+    "compute routers add-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--interface-name=hub-router-1 --subnetwork=hub-${each.key}-0",
+    "--ip-address=${google_compute_address.cr-hub-1[each.key].address}",
+    "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
-    "compute routers remove-interface hub-cr1 --project ${module.project.project_id}",
-    "--interface-name=hub-router-1-0 --region=europe-west1"
+    "compute routers remove-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--interface-name=hub-router-1 --region=${each.key}"
   ])
-  module_depends_on = [module.cloud-router]
-} */
+  module_depends_on = [google_compute_router.cloud-router-ncc]
+}
 
-/* module "cloud-router-interface-2" {
-  source  = "terraform-google-modules/gcloud/google"
-  version = "3.1.0"
+module "cloud-router-ncc-if-2" {
+  for_each                 = var.regions_config["hub"]
+  source                   = "terraform-google-modules/gcloud/google"
+  version                  = "3.1.0"
   service_account_key_file = "ncc-hub-project-f05272af14bb.json"
   create_cmd_body = join(" ", [
-    "compute routers add-interface hub-cr1 --project ${module.project.project_id}",
-    "--interface-name=hub-router-1-1 --subnetwork=hub-europe-west1-1 --ip-address=10.0.0.20",
-    "--redundant-interface=hub-router-1-0 --region=europe-west1"
+    "compute routers add-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--interface-name=hub-router-2 --subnetwork=hub-${each.key}-0",
+    "--redundant-interface=hub-router-1 --ip-address=${google_compute_address.cr-hub-2[each.key].address}",
+    "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
-    "compute routers remove-interface hub-cr1 --project ${module.project.project_id}",
-    "--interface-name=hub-router-1-1 --region=europe-west1"
+    "compute routers remove-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--interface-name=hub-router-2 --region=${each.key}"
   ])
-  module_depends_on = [module.cloud-router-interface-1]
-} */
+  module_depends_on = [module.cloud-router-ncc-if-1]
+}
 
-/* module "cloud-router-bgp-1" {
-  source  = "terraform-google-modules/gcloud/google"
-  version = "3.1.0"
+module "cloud-router-ncc-bgp-1" {
+  for_each                 = var.regions_config["hub"]
+  source                   = "terraform-google-modules/gcloud/google"
+  version                  = "3.1.0"
   service_account_key_file = "ncc-hub-project-f05272af14bb.json"
   create_cmd_body = join(" ", [
-    "compute routers add-bgp-peer hub-cr1 --project ${module.project.project_id}",
-    "--peer-name=hub-router-1-0 --interface=hub-router-1-0 --peer-ip-address=10.0.0.18",
-    "--peer-asn=65001 --instance=hub-router --instance-zone=europe-west1-b",
-    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.16/28",
-    "--region=europe-west1"
+    "compute routers add-bgp-peer hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--peer-name=hub-router-1 --interface=hub-router-1 --peer-asn=${var.gcp-asn-ra}",
+    "--peer-ip-address=${google_compute_address.ra-hub[each.key].address}",
+    "--instance=${module.hub-router[each.key].instance.name} --instance-zone=${each.key}-b",
+#    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
+    "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
-    "compute routers remove-bgp-peer hub-cr1 --project ${module.project.project_id}",
-    "--peer-name=hub-router-1-0 --region=europe-west1"
+    "compute routers remove-bgp-peer hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--peer-name=hub-router-1 --region=${each.key}"
   ])
-  module_depends_on = [module.cloud-router-interface-2]
-} */
+  module_depends_on = [module.cloud-router-ncc-if-2]
+}
 
-/* module "cloud-router-bgp-2" {
-  source  = "terraform-google-modules/gcloud/google"
-  version = "3.1.0"
+module "cloud-router-ncc-bgp-2" {
+  for_each                 = var.regions_config["hub"]
+  source                   = "terraform-google-modules/gcloud/google"
+  version                  = "3.1.0"
   service_account_key_file = "ncc-hub-project-f05272af14bb.json"
   create_cmd_body = join(" ", [
-    "compute routers add-bgp-peer hub-cr1 --project ${module.project.project_id}",
-    "--peer-name=hub-router-1-1 --interface=hub-router-1-1 --peer-ip-address=10.0.0.18",
-    "--peer-asn=65001 --instance=hub-router --instance-zone=europe-west1-b",
-    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.16/28",
-    "--region=europe-west1"
+    "compute routers add-bgp-peer hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--peer-name=hub-router-2 --interface=hub-router-2 --peer-asn=${var.gcp-asn-ra}",
+    "--peer-ip-address=${google_compute_address.ra-hub[each.key].address}",
+    "--instance=${module.hub-router[each.key].instance.name} --instance-zone=${each.key}-b",
+#    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
+    "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
-    "compute routers remove-bgp-peer hub-cr1 --project ${module.project.project_id}",
-    "--peer-name=hub-router-1-1 --region=europe-west1"
+    "compute routers remove-bgp-peer hub-cr-ncc-${each.key} --project ${module.project.project_id}",
+    "--peer-name=hub-router-2 --region=${each.key}"
   ])
-  module_depends_on = [module.cloud-router-bgp-1]
-} */
+  module_depends_on = [module.cloud-router-ncc-bgp-1]
+}
 
 ################################################################################
 #                       Test VMs, one per region and VPC                       #
@@ -422,13 +447,15 @@ module "vm-hub" {
   name       = "hub-${each.key}"
   network_interfaces = [{
     network    = module.vpc["hub"].self_link
-    subnetwork = module.vpc["hub"].subnet_self_links["${each.key}/hub-${each.key}-1"]
+    subnetwork = module.vpc["hub"].subnet_self_links["${each.key}/hub-${each.key}-0"]
     nat        = false
     addresses  = null
   }]
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
+  # Wait for IP assignment for RAs in the hub is done to not 'steal' the IPs.
+  depends_on = [google_compute_address.ra-hub]
 }
 
 module "vm-prod" {
@@ -439,7 +466,7 @@ module "vm-prod" {
   name       = "prod-${each.key}"
   network_interfaces = [{
     network    = module.vpc["prod"].self_link
-    subnetwork = module.vpc["prod"].subnet_self_links["${each.key}/prod-${each.key}-1"]
+    subnetwork = module.vpc["prod"].subnet_self_links["${each.key}/prod-${each.key}-0"]
     nat        = false
     addresses  = null
   }]
@@ -448,23 +475,22 @@ module "vm-prod" {
   tags                   = ["ssh"]
 }
 
-# Uncomment if you have a "dev" VPC spoke and want VMs there.
-# module "vm-dev" {
-#   for_each   = var.regions_config["dev"]
-#   source     = "../../../modules/compute-vm"
-#   project_id = module.project.project_id
-#   zone       = "${each.key}-b"
-#   name       = "dev-${each.key}"
-#   network_interfaces = [{
-#     network    = module.vpc["dev"].self_link
-#     subnetwork = module.vpc["dev"].subnet_self_links["${each.key}/dev-${each.key}-1"]
-#     nat        = false
-#     addresses  = null
-#   }]
-#   service_account        = module.service-account-gce.email
-#   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-#   tags                   = ["ssh"]
-# }
+module "vm-dev" {
+  for_each   = var.regions_config["dev"]
+  source     = "../../../modules/compute-vm"
+  project_id = module.project.project_id
+  zone       = "${each.key}-b"
+  name       = "dev-${each.key}"
+  network_interfaces = [{
+    network    = module.vpc["dev"].self_link
+    subnetwork = module.vpc["dev"].subnet_self_links["${each.key}/dev-${each.key}-0"]
+    nat        = false
+    addresses  = null
+  }]
+  service_account        = module.service-account-gce.email
+  service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+  tags                   = ["ssh"]
+}
 
 module "vm-onprem" {
   for_each   = var.regions_config["onprem"]
@@ -474,13 +500,15 @@ module "vm-onprem" {
   name       = "onprem-${each.key}"
   network_interfaces = [{
     network    = module.vpc["onprem"].self_link
-    subnetwork = local.onprem_subnet_1
+    subnetwork = local.onprem_subnet
     nat        = false
     addresses  = null
   }]
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
+  # Wait for IP assignment for RAs in onprem is done to not 'steal' the IPs.
+  depends_on = [google_compute_address.ra-onprem]
 }
 
 module "service-account-gce" {

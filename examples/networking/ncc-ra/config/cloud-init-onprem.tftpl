@@ -2,12 +2,15 @@
 
 write_files:
   - path: /opt/vyatta/etc/config/scripts/vyos-postconfig-bootup.script
+    owner: root:vyattacfg
     permissions: '0775'
     content: |
       #!/bin/vbash
       source /opt/vyatta/etc/functions/script-template
       configure
       #!
+      set system login user vyos authentication plaintext-password verysecret
+
       set vpn ipsec ipsec-interfaces interface 'eth0'
       set vpn ipsec esp-group ESP-GROUP compression 'disable'
       set vpn ipsec esp-group ESP-GROUP lifetime '3600'
@@ -27,6 +30,11 @@ write_files:
       set vpn ipsec ike-group IKEv2-GROUP proposal 10 encryption 'aes256gcm128'
       set vpn ipsec ike-group IKEv2-GROUP proposal 10 hash 'sha256'
       #!
+      #set protocols static interface-route ${gateway}/32 next-hop-interface eth0 distance 1
+      #set protocols static route ${network} next-hop ${gateway}
+      #set protocols static route 0.0.0.0/0 next-hop ${gateway} distance 1
+      set protocols static route ${peer}/32 next-hop ${gateway}
+
       set interfaces vti vti0 address '${bgp_ip}/30'
       set interfaces vti vti0 description 'HUB-TUN0'
       set interfaces vti vti0 mtu '1400'
@@ -41,14 +49,15 @@ write_files:
       set vpn ipsec site-to-site peer ${peer} vti esp-group 'ESP-GROUP'
       set vpn ipsec site-to-site peer ${peer} description 'HUB-TUN0'
       #!
-      set protocols bgp ${asn} neighbor ${neighbor} ebgp-multihop 10
+      #set protocols bgp ${asn} neighbor ${neighbor} ebgp-multihop 10
 
       set protocols bgp ${asn} neighbor ${neighbor} remote-as '${remote_asn}'
       set protocols bgp ${asn} neighbor ${neighbor} address-family ipv4-unicast soft-reconfiguration inbound
       set protocols bgp ${asn} neighbor ${neighbor} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor} timers keepalive '20'
       
-      set protocols bgp ${asn} address-family ipv4-unicast network ${network}
+      #set protocols bgp ${asn} address-family ipv4-unicast network ${network}
+      set protocols bgp ${asn} address-family ipv4-unicast network 192.168.0.0/24
 
       set protocols bgp ${asn} parameters graceful-restart
       #!
@@ -58,3 +67,6 @@ write_files:
       run reset ip bgp ${neighbor}
       save
       exit
+      # Avoid manual config lock out (see e.g. https://forum.vyos.io/t/error-message-set-failed/296/5)
+      chown -R root:vyattacfg /opt/vyatta/config/active/
+      chown -R root:vyattacfg /opt/vyatta/etc/
