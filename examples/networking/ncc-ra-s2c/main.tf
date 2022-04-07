@@ -66,6 +66,45 @@ module "vpc" {
   ])
 }
 
+module "nat-hub" {
+  for_each       = var.regions_config["hub"]
+  source         = "../../../modules/net-cloudnat"
+  project_id     = module.project.project_id
+  region         = each.key
+  name           = "hub-${each.key}"
+  router_name    = "hub-${each.key}"
+  router_network = module.vpc["hub"].self_link
+}
+
+module "nat-prod" {
+  for_each       = var.regions_config["prod"]
+  source         = "../../../modules/net-cloudnat"
+  project_id     = module.project.project_id
+  region         = each.key
+  name           = "prod-${each.key}"
+  router_name    = "prod-${each.key}"
+  router_network = module.vpc["prod"].self_link
+}
+
+module "nat-dev" {
+  for_each       = var.regions_config["dev"]
+  source         = "../../../modules/net-cloudnat"
+  project_id     = module.project.project_id
+  region         = each.key
+  name           = "dev-${each.key}"
+  router_name    = "dev-${each.key}"
+  router_network = module.vpc["dev"].self_link
+}
+
+module "nat-onprem" {
+  source         = "../../../modules/net-cloudnat"
+  project_id     = module.project.project_id
+  region         = local.onprem_region
+  name           = "onprem-${local.onprem_region}"
+  router_name    = "onprem-${local.onprem_region}"
+  router_network = module.vpc["onprem"].self_link
+}
+
 module "vpc-firewall" {
   for_each            = module.vpc
   source              = "../../../modules/net-vpc-firewall"
@@ -432,6 +471,13 @@ module "cloud-router-ncc-bgp-2" {
 #                       Test VMs, one per region and VPC                       #
 ################################################################################
 
+locals {
+  vm-startup-script = join("\n", [
+    "#! /bin/bash",
+    "apt-get update && apt-get install -y iperf"
+  ])
+}
+
 module "vm-hub" {
   for_each   = var.regions_config["hub"]
   source     = "../../../modules/compute-vm"
@@ -444,6 +490,7 @@ module "vm-hub" {
     nat        = false
     addresses  = null
   }]
+  metadata               = { startup-script = local.vm-startup-script }
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
@@ -463,6 +510,7 @@ module "vm-prod" {
     nat        = false
     addresses  = null
   }]
+  metadata               = { startup-script = local.vm-startup-script }
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
@@ -480,6 +528,7 @@ module "vm-dev" {
     nat        = false
     addresses  = null
   }]
+  metadata               = { startup-script = local.vm-startup-script }
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
@@ -497,6 +546,7 @@ module "vm-onprem" {
     nat        = false
     addresses  = null
   }]
+  metadata               = { startup-script = local.vm-startup-script }
   service_account        = module.service-account-gce.email
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
