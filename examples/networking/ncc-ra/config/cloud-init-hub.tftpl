@@ -62,10 +62,12 @@ write_files:
       set protocols bgp ${asn} neighbor ${neighbor_cr_1} address-family ipv4-unicast soft-reconfiguration inbound
       set protocols bgp ${asn} neighbor ${neighbor_cr_1} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor_cr_1} timers keepalive '20'
+      set protocols bgp ${asn} neighbor ${neighbor_cr_1} ebgp-multihop '4'
       set protocols bgp ${asn} neighbor ${neighbor_cr_2} remote-as '${cr_asn}'
       set protocols bgp ${asn} neighbor ${neighbor_cr_2} address-family ipv4-unicast soft-reconfiguration inbound
       set protocols bgp ${asn} neighbor ${neighbor_cr_2} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor_cr_2} timers keepalive '20'
+      set protocols bgp ${asn} neighbor ${neighbor_cr_2} ebgp-multihop '4'
       set protocols bgp ${asn} parameters graceful-restart
       #!
       

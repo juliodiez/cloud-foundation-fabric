@@ -56,9 +56,8 @@ write_files:
       set protocols bgp ${asn} neighbor ${neighbor} timers holdtime '60'
       set protocols bgp ${asn} neighbor ${neighbor} timers keepalive '20'
       
-      #set protocols bgp ${asn} address-family ipv4-unicast network ${network}
-      set protocols bgp ${asn} address-family ipv4-unicast network 192.168.0.0/24
-
+      set protocols bgp ${asn} address-family ipv4-unicast network ${network}
+      
       set protocols bgp ${asn} parameters graceful-restart
       #!
       

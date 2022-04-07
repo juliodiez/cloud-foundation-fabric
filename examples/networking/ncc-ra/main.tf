@@ -237,7 +237,8 @@ module "hub-router" {
   name       = "hub-ra-${each.key}"
   boot_disk = {
     # image = "projects/sentrium-public/global/images/vyos-1-2-7"
-    image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
+    # image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
+    image = "projects/sentrium-public/global/images/vyos-1-3-0"
     type  = "pd-balanced"
     size  = 10
   }
@@ -282,7 +283,8 @@ module "onprem-router" {
   name       = "onprem-ra-${each.key}"
   boot_disk = {
     # image = "projects/sentrium-public/global/images/vyos-1-2-7"
-    image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
+    # image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
+    image = "projects/sentrium-public/global/images/vyos-1-3-0"
     type  = "pd-balanced"
     size  = 10
   }
@@ -370,10 +372,7 @@ module "cloud-router-ncc-if-1" {
     "--ip-address=${google_compute_address.cr-hub-1[each.key].address}",
     "--region=${each.key}"
   ])
-  destroy_cmd_body = join(" ", [
-    "compute routers remove-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
-    "--interface-name=hub-router-1 --region=${each.key}"
-  ])
+  destroy_cmd_body = "version" # do nothing
   module_depends_on = [google_compute_router.cloud-router-ncc]
 }
 
@@ -388,10 +387,7 @@ module "cloud-router-ncc-if-2" {
     "--redundant-interface=hub-router-1 --ip-address=${google_compute_address.cr-hub-2[each.key].address}",
     "--region=${each.key}"
   ])
-  destroy_cmd_body = join(" ", [
-    "compute routers remove-interface hub-cr-ncc-${each.key} --project ${module.project.project_id}",
-    "--interface-name=hub-router-2 --region=${each.key}"
-  ])
+  destroy_cmd_body = "version" # do nothing
   module_depends_on = [module.cloud-router-ncc-if-1]
 }
 
