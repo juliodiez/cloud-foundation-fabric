@@ -236,8 +236,6 @@ module "hub-router" {
   zone       = "${each.key}-b"
   name       = "hub-ra-${each.key}"
   boot_disk = {
-    # image = "projects/sentrium-public/global/images/vyos-1-2-7"
-    # image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
     image = "projects/sentrium-public/global/images/vyos-1-3-0"
     type  = "pd-balanced"
     size  = 10
@@ -282,8 +280,6 @@ module "onprem-router" {
   zone       = "${local.onprem_region}-b"
   name       = "onprem-ra-${each.key}"
   boot_disk = {
-    # image = "projects/sentrium-public/global/images/vyos-1-2-7"
-    # image = "projects/ncc-hub-project/global/images/vyos-1-2-7-multi-ip-subnet"
     image = "projects/sentrium-public/global/images/vyos-1-3-0"
     type  = "pd-balanced"
     size  = 10
@@ -320,11 +316,12 @@ module "onprem-router" {
 # The onprem router will learn how to reach GCP via BGP, but for convenience we
 # make this work with summarized static routes in the VPC.
 resource "google_compute_route" "route-to-gcp" {
-  name              = "route-to-gcp-${local.onprem_region}"
+  for_each          = var.regions_blocks
+  name              = "route-to-gcp-${each.key}"
   project           = module.project.project_id
-  dest_range        = "10.0.0.0/8"
+  dest_range        = each.value
   network           = module.vpc["onprem"].name
-  next_hop_instance = module.onprem-router[local.onprem_region].self_link
+  next_hop_instance = module.onprem-router[each.key].self_link
 }
 
 ################################################################################
@@ -372,7 +369,7 @@ module "cloud-router-ncc-if-1" {
     "--ip-address=${google_compute_address.cr-hub-1[each.key].address}",
     "--region=${each.key}"
   ])
-  destroy_cmd_body = "version" # do nothing
+  destroy_cmd_body  = "version" # do nothing
   module_depends_on = [google_compute_router.cloud-router-ncc]
 }
 
@@ -387,7 +384,7 @@ module "cloud-router-ncc-if-2" {
     "--redundant-interface=hub-router-1 --ip-address=${google_compute_address.cr-hub-2[each.key].address}",
     "--region=${each.key}"
   ])
-  destroy_cmd_body = "version" # do nothing
+  destroy_cmd_body  = "version" # do nothing
   module_depends_on = [module.cloud-router-ncc-if-1]
 }
 
@@ -401,7 +398,7 @@ module "cloud-router-ncc-bgp-1" {
     "--peer-name=hub-router-1 --interface=hub-router-1 --peer-asn=${var.gcp-asn-ra}",
     "--peer-ip-address=${google_compute_address.ra-hub[each.key].address}",
     "--instance=${module.hub-router[each.key].instance.name} --instance-zone=${each.key}-b",
-#    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
+    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
     "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
@@ -421,7 +418,7 @@ module "cloud-router-ncc-bgp-2" {
     "--peer-name=hub-router-2 --interface=hub-router-2 --peer-asn=${var.gcp-asn-ra}",
     "--peer-ip-address=${google_compute_address.ra-hub[each.key].address}",
     "--instance=${module.hub-router[each.key].instance.name} --instance-zone=${each.key}-b",
-#    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
+    "--advertisement-mode=CUSTOM --set-advertisement-ranges=10.0.0.0/8",
     "--region=${each.key}"
   ])
   destroy_cmd_body = join(" ", [
