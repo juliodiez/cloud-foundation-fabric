@@ -244,7 +244,7 @@ module "hub-router" {
   instance_type  = "n1-standard-2"
   metadata = {
     serial-port-enable = "TRUE"
-    user-data = templatefile("${path.module}/config/cloud-init-hub.tftpl", {
+    user-data = templatefile("${path.module}/config/cloud-init-hub.yaml", {
       network       = element(var.regions_config["hub"][each.key], 0)
       gateway       = cidrhost(element(var.regions_config["hub"][each.key], 0), 1)
       host          = google_compute_address.ra-hub[each.key].address
@@ -288,7 +288,7 @@ module "onprem-router" {
   instance_type  = "n1-standard-2"
   metadata = {
     serial-port-enable = "TRUE"
-    user-data = templatefile("${path.module}/config/cloud-init-onprem.tftpl", {
+    user-data = templatefile("${path.module}/config/cloud-init-onprem.yaml", {
       network    = element(values(var.regions_config["onprem"])[0], 0)
       gateway    = cidrhost(element(values(var.regions_config["onprem"])[0], 0), 1)
       host       = google_compute_address.ra-onprem[each.key].address
