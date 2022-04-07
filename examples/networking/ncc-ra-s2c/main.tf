@@ -393,6 +393,9 @@ resource "google_compute_router" "cloud-router-ncc" {
   for_each = var.regions_config["hub"]
   name     = "hub-cr-ncc-${each.key}"
   network  = module.vpc["hub"].self_link
+  bgp {
+    asn = var.gcp-asn-cr
+  }
   region   = each.key
   project  = module.project.project_id
 }
